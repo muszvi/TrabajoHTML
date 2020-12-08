@@ -5,6 +5,7 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <Ticker.h>
+#include <Servo.h>
 
 //External files
 #include "config.h"
@@ -15,20 +16,22 @@ ESP8266WebServer server(8080);
 
 //Time server
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600);
+NTPClient timeClient(ntpUDP,"europe.pool.ntp.org",3600);
 
-//Interrupctions
-Ticker realTime;
+//Servo
+Servo myServo;
 
 //NodeMCU variables
 #define LED 2
 
 //Global variables
-const int timeRefreshRate = 10;
 int timeHours = 0;
 int timeMinutes = 0;
-const int alarmHour = 13;
-const int alarmMinute = 12;
+int alarmHour = -1;
+int alarmMinute = -1;
+double currentTime = 0;
+double previousTime = 0;
+bool done = false;
 
 /*
  * Setup
@@ -42,16 +45,15 @@ void setup(void)
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
 
+  //Servo
+  myServo.attach(2);
+  myServo.write(0);
+
   //Connect to WiFi
   ConnectToWiFi();
 
   //Connect to NPT server
   timeClient.begin();
-
-  delay(5000);
-
-  //Interrupction setup
-  realTime.attach(timeRefreshRate,getTime);
 }
 
 /*
@@ -62,9 +64,23 @@ void loop(void)
   //Handle client requests
   server.handleClient();
 
-  if (alarmHour == timeHours && alarmMinute == timeMinutes)
+  //Update current time
+  currentTime = millis()/1000;
+  if (currentTime != previousTime)
+  {
+    getTime();
+  }
+  previousTime = currentTime;
+
+  //Turn on LED when the alarm goes off
+  if (alarmHour == timeHours && alarmMinute == timeMinutes && !done)
   {
     digitalWrite(LED,LOW);
+    moveServo();
+  }
+  else
+  {
+    digitalWrite(LED,HIGH);
   }
 }
 
@@ -113,9 +129,9 @@ void getTime()
   timeClient.update();
   timeHours = timeClient.getHours();
   timeMinutes = timeClient.getMinutes();
-  Serial.print(timeClient.getHours());
+  Serial.print(timeHours);
   Serial.print(":");
-  Serial.print(timeClient.getMinutes());
+  Serial.print(timeMinutes);
   Serial.print(":");
   Serial.println(timeClient.getSeconds());
 }
@@ -126,8 +142,7 @@ void getTime()
 void headerActions()
 {
   server.on("/", mainPage);
-  server.on("/on", turnONLED);
-  server.on("/off", turnOFFLED);
+  server.on("/set", setAlarm);
   server.on("/test", testingFunction);
   server.onNotFound(errorPage);
 }
@@ -143,17 +158,40 @@ void errorPage()
 {
   server.send(200, "text/html", ERROR_PAGE);
 }
-void turnONLED()
+void setAlarm()
 {
-  server.send(200, "text/html", MAIN_PAGE);
-  digitalWrite(LED, LOW);
-}
-void turnOFFLED()
-{
-  server.send(200, "text/html", MAIN_PAGE);
-  digitalWrite(LED, HIGH);
+  alarmHour = server.arg("hour").toInt();
+  alarmMinute = server.arg("minute").toInt();
+
+  Serial.print("Alarma configurada para las ");
+  Serial.print(alarmHour);
+  Serial.print(" horas y ");
+  Serial.print(alarmMinute);
+  Serial.println(" minutos.");
+  
+  server.send(200, "text/html", SET_PAGE);
 }
 void testingFunction()
 {
-  server.send(200, "text/html", TEST_PAGE);
+  server.send(200, "text/html", ERROR_PAGE);
+}
+
+/*
+ * Move Servo
+ */
+void moveServo()
+{
+  int pos = 0;
+
+  for (pos = 0; pos <= 180; pos += 1)
+  { 
+    myServo.write(pos);              
+    delay(5);                      
+  }
+  for (pos = 180; pos >= 0; pos -= 1)
+  { 
+    myServo.write(pos);
+    delay(5);
+  }
+  done = true;
 }
